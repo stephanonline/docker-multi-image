@@ -1,67 +1,71 @@
 const keys = require('./keys');
-const express = require('express');
-const bodyParser = requie('body-parser');
-const cors = require('cors');
-const pg = require('pg');
 
-var redisClient = redis.createClient({ 
-    host: keys.redisHost, 
-    port: keys.redisPort, 
-    retry_strategy: () => 1000 
-});
+// Express App Setup
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// Postgres Client Setup
 const { Pool } = require('pg');
 const pgClient = new Pool({
-    host: keys.pgHost,
-    port: keys.pgPort,
-    user: keys.pgUser,
-    password: keys.pgPassword,
-    database: keys.pgDatabase
+  user: keys.pgUser,
+  host: keys.pgHost,
+  database: keys.pgDatabase,
+  password: keys.pgPassword,
+  port: keys.pgPort,
 });
 
-pgClient.on('error', () => console.log('Lost PG Connection'));
-
-pgClient.query('CREATE TABLE IF NOT EXISTS values (number INT)')
+pgClient.on('connect', () => {
+  pgClient
+    .query('CREATE TABLE IF NOT EXISTS values (number INT)')
     .catch((err) => console.log(err));
-
-
-var redisClient = redis.createClient({ 
-    host: keys.redisHost, 
-    port: keys.redisPort, 
-    retry_strategy: () => 1000 
 });
 
+// Redis Client Setup
+const redis = require('redis');
+const redisClient = redis.createClient({
+  host: keys.redisHost,
+  port: keys.redisPort,
+  retry_strategy: () => 1000,
+});
 const redisPublisher = redisClient.duplicate();
 
+// Express route handlers
 
-app.get('/', (req, res) => res.send('Hi'));
+app.get('/', (req, res) => {
+  res.send('Hi');
+});
 
 app.get('/values/all', async (req, res) => {
-    const values = await pgClient.query('SELECT * FROM values');
+  const values = await pgClient.query('SELECT * from values');
 
-    res.send(values.rows);
+  res.send(values.rows);
 });
 
 app.get('/values/current', async (req, res) => {
-    redisClient.htgetall('values', (err, values) => {
-        res.send(values);
-    });
-})
+  redisClient.hgetall('values', (err, values) => {
+    res.send(values);
+  });
+});
 
 app.post('/values', async (req, res) => {
-    const index = req.body.index;
+  const index = req.body.index;
 
-    if (parseInt(index) > 40)
+  if (parseInt(index) > 40) {
     return res.status(422).send('Index too high');
+  }
 
-    redisClient.hset('values', index, 'Nothing yet');
-    redisPublisher.publish('indx', index);
-    pgClient.query('INSERT INTO values(number) VALUES ($1)', [index])
-})
+  redisClient.hset('values', index, 'Nothing yet!');
+  redisPublisher.publish('insert', index);
+  pgClient.query('INSERT INTO values(number) VALUES($1)', [index]);
 
-const PORT_NUMBER = 5000;
-app.listen(PORT_NUMBER, () => console.log(`Listening on port ${PORT_NUMBER}`))
+  res.send({ working: true });
+});
+
+app.listen(5000, (err) => {
+  console.log('Listening');
+});
